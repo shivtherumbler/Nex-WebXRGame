@@ -4,7 +4,7 @@
 
 - 🔭 I’m currently working on **a WEBXR Game**
 
-<p> The controls of the game pretty simple you have use your right joystick to rotate and move while using the browser and your left joystick while playing in Unity. Your arms have the power of fire so press the trigger and grip to unleash the wrath. Keep in mind you only have 10 
+<p> The controls of the game pretty simple you have survive the lava. Use your right joystick to rotate and move while using the browser and your left joystick while playing in Unity. Your arms have the power of fire so press the trigger and grip to unleash the wrath. Keep in mind you only have 10 
 lives to survive, which can see on your left hand. </p>
 
 <h3 align="left">Connect with me:</h3>
