@@ -3,221 +3,174 @@ using WebXR;
 
 public class WebXRPlayerController : MonoBehaviour
 {
-    public float speed = 3f; // Player movement speed
-    public GameObject freezeEffect; // Prefab for frozen enemies
-    public float mouseSensitivity = 2f; // Sensitivity of mouse movement
+    public float speed = 3f;
+    public float rotationAngle = 30f; // Snap rotation angle
+    public Transform vrCamera;
+    public GameObject fireEffect; // Fire effect prefab
 
-    public GameObject leftHandPrefab;  // Hand model for left hand
-    public GameObject rightHandPrefab; // Hand model for right hand
-    public Camera playerCamera;
-
-
+    private Rigidbody rb;
     private WebXRController leftController;
     private WebXRController rightController;
-    private CharacterController characterController;
+    private bool isVR = false;
+    private bool fireActive = false;
+    private bool canRotate = true; // Prevents continuous rotation from a single swipe
 
-    private GameObject leftHandObject;  // To store the left hand model instance
-    private GameObject rightHandObject; // To store the right hand model instance
-
-    private bool isVR = false; // Whether the game is running in VR
-    private float pitch = 0f;  // Vertical camera rotation
-
-
-    void Start()
+    private void Start()
     {
-        // Get the CharacterController component
-        characterController = GetComponent<CharacterController>();
-        if (characterController == null)
+        rb = GetComponent<Rigidbody>();
+        if (rb == null)
         {
-            Debug.LogError("❌ CharacterController component is missing on the player!");
-        }
-
-        playerCamera = GetComponentInChildren<Camera>();
-        if (playerCamera == null)
-        {
-            Debug.LogError("❌ Camera component is missing on the player!");
-        }
-
-        // Check if VR is supported, improve performance by checking once
-        isVR = WebXRManager.Instance != null && WebXRManager.Instance.isSupportedVR;
-
-        // Find WebXR controllers
-        FindWebXRControllers();
-
-        // Validate freeze effect prefab
-        if (freezeEffect == null)
-        {
-            Debug.LogError("❌ Freeze Effect Prefab is missing!");
-        }
-
-        // Spawn hands for VR
-        if (isVR)
-        {
-            SpawnHands();
-        }
-    }
-
-    void Update()
-    {
-        if (isVR)
-        {
-            HandleMovement();
-            HandleAttack();
+            Debug.LogError("❌ Missing Rigidbody on the Player");
         }
         else
         {
-            HandlePCMovement();
-            HandleAttack();
-            HandlePCMouseLook();  // Handle mouse look for PC
-
+            rb.freezeRotation = true; // Prevents unwanted rotation
         }
 
-        // Update hands' positions
+        if (WebXRManager.Instance != null && WebXRManager.Instance.isSupportedVR)
+        {
+            isVR = true;
+            Debug.Log("VR is supported and enabled.");
+            FindWebXRControllers();
+        }
+        else
+        {
+            isVR = false;
+            Debug.Log("VR is not supported. Using keyboard controls.");
+        }
+
+        if (fireEffect != null)
+        {
+            fireEffect.SetActive(false); // Ensure fire effect is initially off
+        }
+    }
+
+    private void Update()
+    {
         if (isVR)
         {
-            UpdateHandsPosition();
+            HandleVRMovement();
+            HandleVRFire();
+        }
+        else
+        {
+            HandleKeyboardMovement();
+            HandleNonVRFire();
         }
     }
 
-    void HandleMovement()
+    private void HandleVRMovement()
     {
-        Vector3 moveDirection = Vector3.zero;
+        if (rightController == null) return;
 
-        // **VR Controls (WebXR Joystick)**
-        if (rightController != null)
+        Vector2 joystickInput = rightController.GetAxis2D(WebXRController.Axis2DTypes.Thumbstick);
+
+        // Movement logic
+        if (joystickInput.magnitude > 0.1f)
         {
-            Vector2 joystickInput = rightController.GetAxis2D(WebXRController.Axis2DTypes.Thumbstick);
-            moveDirection = new Vector3(joystickInput.x, 0, joystickInput.y).normalized;
+            Vector3 moveDirection = vrCamera.forward * joystickInput.y + vrCamera.right * joystickInput.x;
+            moveDirection.y = 0;
+            rb.linearVelocity = new Vector3(moveDirection.x * speed, rb.linearVelocity.y, moveDirection.z * speed);
         }
 
-        // Adjust movement based on camera's forward direction
-        if (moveDirection.magnitude > 0)
+        // Snap Rotation logic using thumbstick X-axis
+        if (canRotate)
         {
-            // Get the camera's forward and right direction
-            Vector3 cameraForward = playerCamera.transform.forward;
-            Vector3 cameraRight = playerCamera.transform.right;
-
-            // Flatten the vectors to ignore the vertical axis (up/down)
-            cameraForward.y = 0;
-            cameraRight.y = 0;
-
-            // Normalize them
-            cameraForward = cameraForward.normalized;
-            cameraRight = cameraRight.normalized;
-
-            // Calculate movement direction based on camera's orientation
-            moveDirection = (cameraForward * moveDirection.y + cameraRight * moveDirection.x).normalized;
+            if (joystickInput.x > 0.5f) // Right swipe
+            {
+                transform.Rotate(0, rotationAngle, 0);
+                canRotate = false; // Prevents continuous rotation from holding the thumbstick
+            }
+            else if (joystickInput.x < -0.5f) // Left swipe
+            {
+                transform.Rotate(0, -rotationAngle, 0);
+                canRotate = false;
+            }
         }
-
-        ApplyMovement(moveDirection);
+        else if (Mathf.Abs(joystickInput.x) < 0.2f) // Reset canRotate when joystick is centered
+        {
+            canRotate = true;
+        }
     }
 
-    void HandlePCMovement()
+    private void HandleKeyboardMovement()
     {
-        // **PC Controls (Keyboard)**
         float moveX = Input.GetAxis("Horizontal");
         float moveZ = Input.GetAxis("Vertical");
         Vector3 moveDirection = new Vector3(moveX, 0, moveZ).normalized;
 
-        // Adjust movement based on camera's forward direction
-        if (moveDirection.magnitude > 0)
+        Vector3 cameraForward = vrCamera.forward;
+        Vector3 cameraRight = vrCamera.right;
+        cameraForward.y = 0;
+        cameraRight.y = 0;
+        cameraForward.Normalize();
+        cameraRight.Normalize();
+
+        Vector3 adjustedMoveDirection = cameraForward * moveZ + cameraRight * moveX;
+
+        if (adjustedMoveDirection.magnitude > 0)
         {
-            // Get the camera's forward and right direction
-            Vector3 cameraForward = playerCamera.transform.forward;
-            Vector3 cameraRight = playerCamera.transform.right;
-
-            // Flatten the vectors to ignore the vertical axis (up/down)
-            cameraForward.y = 0;
-            cameraRight.y = 0;
-
-            // Normalize them
-            cameraForward = cameraForward.normalized;
-            cameraRight = cameraRight.normalized;
-
-            // Calculate movement direction based on camera's orientation
-            moveDirection = (cameraForward * moveDirection.z + cameraRight * moveDirection.x).normalized;
+            rb.linearVelocity = new Vector3(adjustedMoveDirection.x * speed, rb.linearVelocity.y, adjustedMoveDirection.z * speed);
         }
 
-        ApplyMovement(moveDirection);
-    }
-
-    void HandlePCMouseLook()
-    {
-        // **PC Mouse Look**
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
-
-        // Rotate the player horizontally (Y-axis rotation)
-        transform.Rotate(Vector3.up * mouseX);
-
-        // Limit vertical camera rotation
-        pitch -= mouseY;
-        pitch = Mathf.Clamp(pitch, -80f, 80f);  // Limit looking up and down
-
-        // Apply vertical camera rotation
-        playerCamera.transform.localRotation = Quaternion.Euler(pitch, 0f, 0f);
-    }
-
-
-    void ApplyMovement(Vector3 moveDirection)
-    {
-        if (moveDirection.magnitude > 0 && characterController != null)
+        if (Input.GetKeyDown(KeyCode.Q))
         {
-            characterController.Move(moveDirection * speed * Time.deltaTime);
+            transform.Rotate(0, -rotationAngle, 0);
+        }
+        else if (Input.GetKeyDown(KeyCode.E))
+        {
+            transform.Rotate(0, rotationAngle, 0);
         }
     }
 
-    void HandleAttack()
+    private void HandleVRFire()
     {
-        bool attackPressed = false;
+        if (rightController == null) return;
+        bool gripPressed = rightController.GetButton(WebXRController.ButtonTypes.Grip);
+        bool triggerPressed = rightController.GetButton(WebXRController.ButtonTypes.Trigger);
 
-        // **Check for attack button (Trigger)**
-        if (isVR && rightController != null)
+        if ((gripPressed || triggerPressed) && !fireActive)
         {
-            attackPressed = rightController.GetButtonDown(WebXRController.ButtonTypes.Trigger);
+            StartFire();
         }
-        else
+        else if (!gripPressed && !triggerPressed && fireActive)
         {
-            attackPressed = Input.GetMouseButtonDown(0); // Left mouse button for PC
-        }
-
-        if (attackPressed)
-        {
-            Debug.Log("🧊 Attack! Freezing Enemy!");
-            PerformAttack();
+            StopFire();
         }
     }
 
-    void PerformAttack()
+    private void HandleNonVRFire()
     {
-        // Raycast to find an enemy
-        RaycastHit hit;
-        if (Physics.Raycast(transform.position, transform.forward, out hit, 5f))
+        if (Input.GetKeyDown(KeyCode.F) && !fireActive)
         {
-            if (hit.collider.CompareTag("Enemy"))
-            {
-                FreezeEnemy(hit.collider.gameObject);
-            }
+            StartFire();
+        }
+        else if (Input.GetKeyUp(KeyCode.F) && fireActive)
+        {
+            StopFire();
         }
     }
 
-    void FreezeEnemy(GameObject enemy)
+    private void StartFire()
     {
-        if (freezeEffect != null)
+        if (fireEffect != null)
         {
-            // Replace enemy with frozen effect
-            Instantiate(freezeEffect, enemy.transform.position, Quaternion.identity);
-            Destroy(enemy); // Remove original enemy
-        }
-        else
-        {
-            Debug.LogError("❌ Freeze Effect Prefab is missing!");
+            fireEffect.SetActive(true);
+            fireActive = true;
         }
     }
 
-    void FindWebXRControllers()
+    private void StopFire()
     {
-        // Find all WebXRController components in the scene
+        if (fireEffect != null)
+        {
+            fireEffect.SetActive(false);
+            fireActive = false;
+        }
+    }
+
+    private void FindWebXRControllers()
+    {
         WebXRController[] controllers = FindObjectsOfType<WebXRController>();
 
         foreach (WebXRController controller in controllers)
@@ -225,49 +178,18 @@ public class WebXRPlayerController : MonoBehaviour
             if (controller.hand == WebXRControllerHand.LEFT)
             {
                 leftController = controller;
+                Debug.Log("✅ Left Controller Assigned: " + leftController.name);
             }
             else if (controller.hand == WebXRControllerHand.RIGHT)
             {
                 rightController = controller;
+                Debug.Log("✅ Right Controller Assigned: " + rightController.name);
             }
         }
 
         if (leftController == null || rightController == null)
         {
-            Debug.LogWarning("⚠️ One or both WebXR controllers are missing!");
-        }
-    }
-
-    void SpawnHands()
-    {
-        if (leftHandPrefab != null && rightHandPrefab != null)
-        {
-            leftHandObject = Instantiate(leftHandPrefab, transform);
-            rightHandObject = Instantiate(rightHandPrefab, transform);
-
-            // Position the hands at the controllers
-            leftHandObject.transform.localPosition = leftController.transform.localPosition;
-            rightHandObject.transform.localPosition = rightController.transform.localPosition;
-        }
-        else
-        {
-            Debug.LogError("❌ Left and Right Hand Prefabs are missing!");
-        }
-    }
-
-    void UpdateHandsPosition()
-    {
-        // Update the position of the hands based on the controllers
-        if (leftController != null && leftHandObject != null)
-        {
-            leftHandObject.transform.position = leftController.transform.position;
-            leftHandObject.transform.rotation = leftController.transform.rotation;
-        }
-
-        if (rightController != null && rightHandObject != null)
-        {
-            rightHandObject.transform.position = rightController.transform.position;
-            rightHandObject.transform.rotation = rightController.transform.rotation;
+            Debug.LogError("❌ WebXR controllers are missing!");
         }
     }
 }
